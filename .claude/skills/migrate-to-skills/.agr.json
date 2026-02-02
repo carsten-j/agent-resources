@@ -1,0 +1,7 @@
+{
+  "id": "remote:kasperjunge/migrate-to-skills",
+  "tool": "claude",
+  "installed_name": "migrate-to-skills",
+  "type": "remote",
+  "handle": "kasperjunge/migrate-to-skills"
+}

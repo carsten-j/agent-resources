@@ -1,0 +1,7 @@
+{
+  "id": "remote:davidfowl/dotnet-skillz/ilspy-decompile",
+  "tool": "claude",
+  "installed_name": "ilspy-decompile",
+  "type": "remote",
+  "handle": "davidfowl/dotnet-skillz/ilspy-decompile"
+}

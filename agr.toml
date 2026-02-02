@@ -1,0 +1,4 @@
+dependencies = [
+    {handle = "davidfowl/dotnet-skillz/ilspy-decompile", type = "skill"},
+    {handle = "kasperjunge/migrate-to-skills", type = "skill"},
+]
