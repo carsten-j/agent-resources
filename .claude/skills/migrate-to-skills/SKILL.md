@@ -5,7 +5,7 @@ description: |
   Use when migrating agent resources, consolidating legacy directories, or standardizing 
   across Claude Code, Cursor, Copilot, Codex, and Open Code.
 disable-model-invocation: true
-argument-hint: <scope: all|subagents|commands|rules|path>
+argument-hint: "<scope: all|subagents|commands|rules|path>"
 allowed-tools: Read Write Edit Glob Grep Bash
 ---
 

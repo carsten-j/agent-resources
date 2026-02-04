@@ -1,5 +1,6 @@
 ---
 name: analyze-function
+description: Analyze the specified function from the given file with detailed line-by-line breakdown. Use when you need to understand what a function does, how it works, and why it was implemented that way.
 disable-model-invocation: true
 argument-hint: "filename:function_name"
 ---
