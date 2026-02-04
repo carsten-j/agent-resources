@@ -1,0 +1,40 @@
+name: Validate SKILL.md files
+
+on:
+  push:
+    paths:
+      - '.claude/skills/**/SKILL.md'
+      - 'validator.py'
+      - '.github/workflows/validate-skills.yml'
+  pull_request:
+    paths:
+      - '.claude/skills/**/SKILL.md'
+      - 'validator.py'
+      - '.github/workflows/validate-skills.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Find and validate SKILL.md files
+        run: |
+          exit_code=0
+          for skill_file in $(find .claude/skills -name "SKILL.md" -type f); do
+            echo "Validating: $skill_file"
+            if ! python validator.py "$skill_file"; then
+              exit_code=1
+            fi
+          done
+          exit $exit_code
