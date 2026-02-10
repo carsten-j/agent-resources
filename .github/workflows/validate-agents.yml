@@ -3,12 +3,12 @@ name: Validate Agent files
 on:
   push:
     paths:
-      - '.claude/agents/*.md'
+      - 'agents/*.md'
       - 'agent_validator.py'
       - '.github/workflows/validate-agents.yml'
   pull_request:
     paths:
-      - '.claude/agents/*.md'
+      - 'agents/*.md'
       - 'agent_validator.py'
       - '.github/workflows/validate-agents.yml'
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
       - name: Find and validate agent files
         run: |
           exit_code=0
-          for agent_file in $(find .claude/agents -name "*.md" -type f); do
+          for agent_file in $(find ./agents -name "*.md" -type f); do
             echo "Validating: $agent_file"
             if ! python agent_validator.py "$agent_file"; then
               exit_code=1

@@ -3,12 +3,12 @@ name: Validate SKILL.md files
 on:
   push:
     paths:
-      - '.claude/skills/**/SKILL.md'
+      - 'skills/**/SKILL.md'
       - 'validator.py'
       - '.github/workflows/validate-skills.yml'
   pull_request:
     paths:
-      - '.claude/skills/**/SKILL.md'
+      - 'skills/**/SKILL.md'
       - 'validator.py'
       - '.github/workflows/validate-skills.yml'
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
       - name: Find and validate SKILL.md files
         run: |
           exit_code=0
-          for skill_file in $(find .claude/skills -name "SKILL.md" -type f); do
+          for skill_file in $(find ./skills -name "SKILL.md" -type f); do
             echo "Validating: $skill_file"
             if ! python validator.py "$skill_file"; then
               exit_code=1
