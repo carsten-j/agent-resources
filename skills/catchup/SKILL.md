@@ -9,7 +9,7 @@ disable-model-invocation: true
 This command reviews all changes between the current branch and master, analyzes key files,
 and provides a comprehensive summary to help you catch up on what's been done.
 
-## Steps:
+## Steps
 
 1. Run `git status` to get the current branch name and verify we're not on master
 2. Run `git fetch origin master` to ensure we have the latest master branch
