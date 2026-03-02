@@ -72,4 +72,11 @@ https://www.tbench.ai/leaderboard/terminal-bench/2.0
 
 [Use your LM Studio Models in Claude Code](https://lmstudio.ai/blog/claudecode)
 
+https://www.agentsview.io/
+https://nestenius.se/ai/introducing-the-coding-agent-explorer-net/
+
+https://entire.io/
+https://background-agents.com/
+
+
 https://heyitsolivia.com
