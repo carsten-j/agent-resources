@@ -51,6 +51,7 @@ https://www.tbench.ai/leaderboard/terminal-bench/2.0
 * https://lethain.com/agents-skills/
 * https://www.mihaileric.com/The-Emperor-Has-No-Clothes/
 * https://github.com/github/copilot-sdk
+* https://latentpatterns.com/patterns/pi-mono-architecture
 
 ## Blog posts
 
