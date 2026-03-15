@@ -1,6 +1,7 @@
 ---
 name: pr-review
 description: Review the current Pull Request that has been checked out locally with structured feedback on code quality, issues, testing, and suggestions. Use when you need a comprehensive code review of a PR branch.
+allowed-tools: Bash(git:*) Read Grep Glob
 disable-model-invocation: true
 ---
 
@@ -10,13 +11,13 @@ Review the current Pull Request that has been checked out locally.
 
 ## Instructions
 
-0. ** Prerequisite **
+0. **Prerequisite**
    - Run `git fetch origin master` to ensure we have the latest main branch
 
 1. **Get the PR changes**
+   - Run `git diff --name-only $(git merge-base HEAD origin/master)..HEAD` for a quick overview of changed files
    - Run `git diff $(git merge-base HEAD origin/master)..HEAD` to see all changes
-   - If master doesn't exist, try origin/main
-   - Run `git log --oneline $(git merge-base HEAD origin/main)..HEAD` to see commit messages
+   - Run `git log --oneline $(git merge-base HEAD origin/master)..HEAD` to see commit messages
 
 2. **Understand the context**
    - Examine the changed files to understand the PR's purpose
@@ -56,8 +57,12 @@ Review the current Pull Request that has been checked out locally.
    - Refactoring opportunities
    - Alternative approaches
 
+   ### Verdict
+   - State one of: **Approve**, **Request Changes**, or **Comment**
+   - Briefly justify the verdict
+
 4. **Output Format**
    - Use markdown formatting
-   - Make it ready to paste into a Bitbucket PR comment
+   - Make it ready to paste as a PR comment
    - Be constructive and educational
    - Praise good practices while noting issues

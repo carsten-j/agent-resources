@@ -7,24 +7,28 @@
 #        gwm list
 #        gwm remove <branch-name>
 #        gwm status <branch-name>
+#        gwm prune
 #
 # Options:
-#   --plain    Human-readable output instead of JSON
+#   --plain       Human-readable output instead of JSON
+#   --no-restore  Skip dotnet restore and file copying (add only)
 
 set -euo pipefail
 
-SRC_DIR="/d/kkep/projects/kk.erhvervsportal"
-WORKTREE_DIR="/d/worktrees/kkep"
+SRC_DIR="${GWM_SRC_DIR:-/d/kkep/projects/kk.erhvervsportal}"
+WORKTREE_DIR="${GWM_WORKTREE_DIR:-/d/worktrees/kkep}"
 
-# ── Output mode ──────────────────────────────────────────────
+# ── Flags ────────────────────────────────────────────────────
 PLAIN=false
+NO_RESTORE=false
 for arg in "$@"; do
     [[ "$arg" == "--plain" ]] && PLAIN=true
+    [[ "$arg" == "--no-restore" ]] && NO_RESTORE=true
 done
-# Strip --plain from positional args
+# Strip flags from positional args
 args=()
 for arg in "$@"; do
-    [[ "$arg" != "--plain" ]] && args+=("$arg")
+    [[ "$arg" != "--plain" && "$arg" != "--no-restore" ]] && args+=("$arg")
 done
 set -- "${args[@]+"${args[@]}"}"
 
@@ -74,46 +78,101 @@ require_branch() {
     fi
 }
 
+preflight() {
+    if ! command -v git &>/dev/null; then
+        emit "error" "$cmd" "git is not installed or not in PATH" '{}'
+    fi
+    if [[ ! -d "$SRC_DIR" ]]; then
+        emit "error" "$cmd" "SRC_DIR does not exist: $SRC_DIR (set GWM_SRC_DIR to override)" \
+            "{\"src_dir\":\"$(json_kv "$SRC_DIR")\"}"
+    fi
+    if ! git -C "$SRC_DIR" rev-parse --git-dir &>/dev/null; then
+        emit "error" "$cmd" "SRC_DIR is not a git repository: $SRC_DIR" \
+            "{\"src_dir\":\"$(json_kv "$SRC_DIR")\"}"
+    fi
+    if [[ ! -d "$WORKTREE_DIR" ]]; then
+        mkdir -p "$WORKTREE_DIR" 2>/dev/null || \
+            emit "error" "$cmd" "Cannot create WORKTREE_DIR: $WORKTREE_DIR (set GWM_WORKTREE_DIR to override)" \
+                "{\"worktree_dir\":\"$(json_kv "$WORKTREE_DIR")\"}"
+    fi
+}
+
 # ── Commands ─────────────────────────────────────────────────
 do_add() {
     require_branch
     local worktree_path="$WORKTREE_DIR/$branch"
+    local err
 
+    # Check if branch already exists locally
+    if git -C "$SRC_DIR" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
+        emit "error" "add" "Branch '$branch' already exists locally. Use 'gwm status $branch' to inspect it" \
+            "{\"branch\":\"$(json_kv "$branch")\"}"
+    fi
+
+    # Detect existing or incomplete worktree
     if [[ -d "$worktree_path" ]]; then
-        emit "error" "add" "Worktree already exists at $worktree_path" \
-            "{\"path\":\"$(json_kv "$worktree_path")\"}"
+        if [[ -f "$worktree_path/.git" ]]; then
+            emit "error" "add" "Worktree already exists at $worktree_path" \
+                "{\"path\":\"$(json_kv "$worktree_path")\"}"
+        else
+            emit "error" "add" "Incomplete worktree found at $worktree_path. Run 'gwm remove $branch' to clean up" \
+                "{\"path\":\"$(json_kv "$worktree_path")\",\"incomplete\":true}"
+        fi
+    fi
+
+    # Validate sparse path exists in the repo
+    if [[ -n "$sparse_path" ]]; then
+        if ! git -C "$SRC_DIR" ls-tree --name-only HEAD "$sparse_path" &>/dev/null ||
+           [[ -z "$(git -C "$SRC_DIR" ls-tree --name-only HEAD "$sparse_path" 2>/dev/null)" ]]; then
+            emit "error" "add" "Sparse path '$sparse_path' not found in repository" \
+                "{\"sparse_path\":\"$(json_kv "$sparse_path")\"}"
+        fi
     fi
 
     if [[ -n "$sparse_path" ]]; then
-        git worktree add --no-checkout "$worktree_path" -b "$branch" >/dev/null 2>&1
+        if ! err=$(git worktree add --no-checkout "$worktree_path" -b "$branch" 2>&1); then
+            emit "error" "add" "Failed to create worktree: $err" \
+                "{\"branch\":\"$(json_kv "$branch")\",\"detail\":\"$(json_kv "$err")\"}"
+        fi
         cd "$worktree_path"
         git sparse-checkout init --cone
         git sparse-checkout set "$sparse_path"
         git sparse-checkout add .husky
         git sparse-checkout add .config
-        git checkout "$branch" >/dev/null 2>&1
+        if ! err=$(git checkout "$branch" 2>&1); then
+            emit "error" "add" "Failed to checkout branch: $err" \
+                "{\"branch\":\"$(json_kv "$branch")\",\"detail\":\"$(json_kv "$err")\"}"
+        fi
     else
-        git worktree add "$worktree_path" -b "$branch" >/dev/null 2>&1
+        if ! err=$(git worktree add "$worktree_path" -b "$branch" 2>&1); then
+            emit "error" "add" "Failed to create worktree: $err" \
+                "{\"branch\":\"$(json_kv "$branch")\",\"detail\":\"$(json_kv "$err")\"}"
+        fi
     fi
 
-    cd "$worktree_path/src"
-    dotnet restore --verbosity quiet >/dev/null 2>&1
-
-    # Copy shell scripts
-    cp "$SRC_DIR"/src/*.sh "$worktree_path/src/" 2>/dev/null || true
-
-    # Copy agent and Claude configuration
-    for dir in .agents .claude; do
-        if [[ -d "$SRC_DIR/src/$dir" ]]; then
-            cp -r "$SRC_DIR/src/$dir" "$worktree_path/src/$dir"
+    if ! $NO_RESTORE; then
+        cd "$worktree_path/src"
+        if ! err=$(dotnet restore --verbosity quiet 2>&1); then
+            emit "error" "add" "Worktree created but dotnet restore failed: $err" \
+                "{\"branch\":\"$(json_kv "$branch")\",\"path\":\"$(json_kv "$worktree_path")\",\"detail\":\"$(json_kv "$err")\"}"
         fi
-    done
+
+        # Copy shell scripts
+        cp "$SRC_DIR"/src/*.sh "$worktree_path/src/" 2>/dev/null || true
+
+        # Copy agent and Claude configuration
+        for dir in .agents .claude; do
+            if [[ -d "$SRC_DIR/src/$dir" ]]; then
+                cp -r "$SRC_DIR/src/$dir" "$worktree_path/src/$dir"
+            fi
+        done
+    fi
 
     local sparse_info="null"
     [[ -n "$sparse_path" ]] && sparse_info="\"$sparse_path\""
 
     emit "ok" "add" "Worktree created for branch '$branch'" \
-        "{\"branch\":\"$(json_kv "$branch")\",\"path\":\"$(json_kv "$worktree_path")\",\"sparse_path\":${sparse_info}}"
+        "{\"branch\":\"$(json_kv "$branch")\",\"path\":\"$(json_kv "$worktree_path")\",\"sparse_path\":${sparse_info},\"restored\":$( $NO_RESTORE && echo false || echo true )}"
 }
 
 do_list() {
@@ -200,20 +259,35 @@ do_status() {
         "{\"branch\":\"$(json_kv "$branch")\",\"path\":\"$(json_kv "$worktree_path")\",\"commit\":\"$(json_kv "$commit")\",\"head\":\"$(json_kv "$head_ref")\",\"dirty\":$dirty,\"ahead\":$ahead,\"behind\":$behind}"
 }
 
+do_prune() {
+    local output
+    output=$(git worktree prune --verbose 2>&1) || true
+    local pruned=0
+    if [[ -n "$output" ]]; then
+        pruned=$(echo "$output" | wc -l | tr -d ' ')
+    fi
+
+    emit "ok" "prune" "Pruned $pruned stale worktree reference(s)" \
+        "{\"pruned\":$pruned,\"detail\":\"$(json_kv "$output")\"}"
+}
+
 do_help() {
     emit "ok" "help" "Git Worktree Manager — agent-friendly output" \
-        "{\"commands\":{\"add\":{\"args\":\"<branch-name> [sparse-path]\",\"description\":\"Create a new worktree with optional sparse checkout\"},\"list\":{\"args\":\"\",\"description\":\"List all worktrees with branch and commit info\"},\"remove\":{\"args\":\"<branch-name>\",\"description\":\"Remove worktree and optionally delete branch\"},\"status\":{\"args\":\"<branch-name>\",\"description\":\"Show dirty state, ahead/behind for a worktree\"},\"help\":{\"args\":\"\",\"description\":\"Show this help\"}},\"options\":{\"--plain\":\"Human-readable output instead of JSON\"},\"config\":{\"src_dir\":\"$(json_kv "$SRC_DIR")\",\"worktree_dir\":\"$(json_kv "$WORKTREE_DIR")\"}}"
+        "{\"commands\":{\"add\":{\"args\":\"<branch-name> [sparse-path]\",\"description\":\"Create a new worktree with optional sparse checkout\"},\"list\":{\"args\":\"\",\"description\":\"List all worktrees with branch and commit info\"},\"remove\":{\"args\":\"<branch-name>\",\"description\":\"Remove worktree and optionally delete branch\"},\"status\":{\"args\":\"<branch-name>\",\"description\":\"Show dirty state, ahead/behind for a worktree\"},\"prune\":{\"args\":\"\",\"description\":\"Clean up stale worktree references\"},\"help\":{\"args\":\"\",\"description\":\"Show this help\"}},\"options\":{\"--plain\":\"Human-readable output instead of JSON\",\"--no-restore\":\"Skip dotnet restore and file copying after creating worktree\"},\"config\":{\"src_dir\":\"$(json_kv "$SRC_DIR")\",\"worktree_dir\":\"$(json_kv "$WORKTREE_DIR")\"}}"
 }
 
 # ── Dispatch ─────────────────────────────────────────────────
+[[ "$cmd" != "help" && -n "$cmd" ]] && preflight
+
 case "${cmd}" in
     add)    do_add    ;;
     list)   do_list   ;;
     remove) do_remove ;;
     status) do_status ;;
+    prune)  do_prune  ;;
     help|"") do_help  ;;
     *)
         emit "error" "$cmd" "Unknown command: $cmd" \
-            '{"known_commands":["add","list","remove","status","help"]}'
+            '{"known_commands":["add","list","remove","status","prune","help"]}'
         ;;
 esac

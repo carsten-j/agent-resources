@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-SKILL.md Validator for Claude Code Agent Skills
+SKILL.md Validator for Agent Skills
 
-Validates skill files according to the specification at:
-https://code.claude.com/docs/en/skills
-https://docs.claude.com/en/docs/agents-and-tools/agent-skills/best-practices
+Validates skill files according to the Agent Skills specification at:
+https://agentskills.io/specification
 
 Usage:
-    python skill_validator.py SKILL.md
-    python skill_validator.py path/to/skill/directory
+    python validator.py SKILL.md
+    python validator.py path/to/skill/directory
 """
 
 import argparse
@@ -48,35 +47,31 @@ class ValidationResult:
             self.valid = False
 
 
-# Validation constants from the documentation
+# Validation constants from the specification
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
+MAX_COMPATIBILITY_LENGTH = 500
 MAX_RECOMMENDED_BODY_LINES = 500
-RESERVED_WORDS = {"anthropic", "claude"}
-NAME_PATTERN = re.compile(r"^[a-z0-9-]+$")
-XML_TAG_PATTERN = re.compile(r"<[^>]+>")
 
-# Known frontmatter fields from the Agent Skills specification
-# Required fields
+# Name pattern: lowercase letters, numbers, and hyphens only
+NAME_PATTERN = re.compile(r"^[a-z0-9-]+$")
+
+# Required frontmatter fields
 REQUIRED_FIELDS = {"name", "description"}
 
-# Optional fields supported by Claude Code
+# Optional fields per the Agent Skills specification
 OPTIONAL_FIELDS = {
-    "allowed-tools",  # Restricts which tools the skill can use
-    "model",  # Force specific model (opus, sonnet, haiku)
-    "context",  # Set to "fork" to run in sub-agent context
-    "agent",  # Agent type when context: fork
-    "hooks",  # Lifecycle-scoped hooks (PreToolUse, PostToolUse, Stop)
-    "user-invocable",  # false hides from slash menu but allows Skill tool
-    "disable-model-invocation",  # true blocks Skill tool invocation
-    "argument-hint",  # Usage hints displayed in slash command completion
+    "license",  # License name or reference to a bundled license file
+    "compatibility",  # Max 500 chars. Environment requirements
+    "metadata",  # Arbitrary key-value mapping for additional metadata
+    "allowed-tools",  # Space-delimited list of pre-approved tools (experimental)
+    "disable-model-invocation",  # Blocks Skill tool invocation (not in spec)
 }
 
 # All known fields
 KNOWN_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
 
-# Unsupported string substitution patterns (common mistakes)
-# The only supported syntax is !`command` (Dynamic Context Injection)
+# Unsupported string substitution patterns (common mistakes in body content)
 UNSUPPORTED_SUBSTITUTION_PATTERNS = [
     (re.compile(r"\$\{[^}]+\}"), "${...}", "shell variable expansion"),
     (
@@ -87,13 +82,10 @@ UNSUPPORTED_SUBSTITUTION_PATTERNS = [
     (
         re.compile(r"(?<![!`])\$[A-Z_][A-Z0-9_]*\b"),
         "$VARIABLE",
-        "environment variable (use !`echo $VAR` instead)",
+        "environment variable",
     ),
     (re.compile(r"%[A-Z_][A-Z0-9_]*%"), "%VARIABLE%", "Windows environment variable"),
 ]
-
-# Valid Dynamic Context Injection pattern: !`command`
-DCI_PATTERN = re.compile(r"!\`[^`]+\`")
 
 
 def extract_frontmatter(content: str) -> tuple[Optional[str], Optional[str], int]:
@@ -120,8 +112,10 @@ def extract_frontmatter(content: str) -> tuple[Optional[str], Optional[str], int
     return None, content, 0
 
 
-def validate_name(name: str, result: ValidationResult) -> None:
-    """Validate the 'name' field."""
+def validate_name(
+    name: str, result: ValidationResult, parent_dir_name: str | None = None
+) -> None:
+    """Validate the 'name' field per the specification."""
     if not name:
         result.add_error("Field 'name' is required but missing or empty")
         return
@@ -130,44 +124,48 @@ def validate_name(name: str, result: ValidationResult) -> None:
         result.add_error(f"Field 'name' must be a string, got {type(name).__name__}")
         return
 
-    # Length check
+    # Length check: must be 1-64 characters
     if len(name) > MAX_NAME_LENGTH:
         result.add_error(
             f"Field 'name' exceeds maximum length of {MAX_NAME_LENGTH} characters "
             f"(got {len(name)})"
         )
 
-    # Pattern check (lowercase letters, numbers, hyphens only)
+    # Pattern check: lowercase letters, numbers, and hyphens only
     if not NAME_PATTERN.match(name):
         result.add_error(
             f"Field 'name' must contain only lowercase letters, numbers, and hyphens. "
             f"Got: '{name}'"
         )
 
-    # Reserved words check
-    name_lower = name.lower()
-    for reserved in RESERVED_WORDS:
-        if reserved in name_lower:
-            result.add_error(
-                f"Field 'name' cannot contain reserved word '{reserved}'. Got: '{name}'"
-            )
+    # Must not start with a hyphen
+    if name.startswith("-"):
+        result.add_error(
+            f"Field 'name' must not start with a hyphen. Got: '{name}'"
+        )
 
-    # XML tag check
-    if XML_TAG_PATTERN.search(name):
-        result.add_error(f"Field 'name' cannot contain XML tags. Got: '{name}'")
+    # Must not end with a hyphen
+    if name.endswith("-"):
+        result.add_error(
+            f"Field 'name' must not end with a hyphen. Got: '{name}'"
+        )
 
-    # Naming convention recommendation (gerund form)
-    if not name.endswith("ing") and "-" in name:
-        parts = name.split("-")
-        if not any(part.endswith("ing") for part in parts):
-            result.add_info(
-                f"Consider using gerund form (verb + -ing) for skill name, "
-                f"e.g., 'processing-pdfs' instead of '{name}'"
-            )
+    # Must not contain consecutive hyphens
+    if "--" in name:
+        result.add_error(
+            f"Field 'name' must not contain consecutive hyphens. Got: '{name}'"
+        )
+
+    # Must match parent directory name
+    if parent_dir_name is not None and name != parent_dir_name:
+        result.add_error(
+            f"Field 'name' must match the parent directory name. "
+            f"Got name='{name}', directory='{parent_dir_name}'"
+        )
 
 
 def validate_description(description: str, result: ValidationResult) -> None:
-    """Validate the 'description' field."""
+    """Validate the 'description' field per the specification."""
     if not description:
         result.add_error("Field 'description' is required but missing or empty")
         return
@@ -178,16 +176,12 @@ def validate_description(description: str, result: ValidationResult) -> None:
         )
         return
 
-    # Length check
+    # Length check: must be 1-1024 characters
     if len(description) > MAX_DESCRIPTION_LENGTH:
         result.add_error(
             f"Field 'description' exceeds maximum length of {MAX_DESCRIPTION_LENGTH} "
             f"characters (got {len(description)})"
         )
-
-    # XML tag check
-    if XML_TAG_PATTERN.search(description):
-        result.add_error("Field 'description' cannot contain XML tags")
 
     # Quality checks (warnings/info)
     desc_lower = description.lower()
@@ -226,20 +220,20 @@ def validate_description(description: str, result: ValidationResult) -> None:
             )
 
 
-def validate_allowed_tools(allowed_tools: str, result: ValidationResult) -> None:
-    """Validate the optional 'allowed-tools' field."""
+def validate_allowed_tools(allowed_tools: str | None, result: ValidationResult) -> None:
+    """Validate the optional 'allowed-tools' field (space-delimited list)."""
     if allowed_tools is None:
         return
 
     if not isinstance(allowed_tools, str):
         result.add_error(
-            f"Field 'allowed-tools' must be a string (comma-separated list), "
+            f"Field 'allowed-tools' must be a string (space-delimited list), "
             f"got {type(allowed_tools).__name__}"
         )
         return
 
-    # Parse comma-separated tools
-    tools = [t.strip() for t in allowed_tools.split(",") if t.strip()]
+    # Parse space-delimited tools
+    tools = allowed_tools.split()
 
     if not tools:
         result.add_warning("Field 'allowed-tools' is empty after parsing")
@@ -247,7 +241,77 @@ def validate_allowed_tools(allowed_tools: str, result: ValidationResult) -> None
         result.add_info(f"Allowed tools: {', '.join(tools)}")
 
 
-def validate_frontmatter(frontmatter_str: str, result: ValidationResult) -> dict:
+def validate_license_field(license_val: str | None, result: ValidationResult) -> None:
+    """Validate the optional 'license' field."""
+    if license_val is None:
+        return
+
+    if not isinstance(license_val, str):
+        result.add_error(
+            f"Field 'license' must be a string, got {type(license_val).__name__}"
+        )
+        return
+
+    if not license_val.strip():
+        result.add_warning("Field 'license' is present but empty")
+
+
+def validate_compatibility_field(
+    compatibility: str | None, result: ValidationResult
+) -> None:
+    """Validate the optional 'compatibility' field (max 500 chars)."""
+    if compatibility is None:
+        return
+
+    if not isinstance(compatibility, str):
+        result.add_error(
+            f"Field 'compatibility' must be a string, got {type(compatibility).__name__}"
+        )
+        return
+
+    if not compatibility.strip():
+        result.add_warning("Field 'compatibility' is present but empty")
+        return
+
+    if len(compatibility) > MAX_COMPATIBILITY_LENGTH:
+        result.add_error(
+            f"Field 'compatibility' exceeds maximum length of "
+            f"{MAX_COMPATIBILITY_LENGTH} characters (got {len(compatibility)})"
+        )
+
+
+def validate_metadata_field(
+    metadata: dict | None, result: ValidationResult
+) -> None:
+    """Validate the optional 'metadata' field (string keys to string values)."""
+    if metadata is None:
+        return
+
+    if not isinstance(metadata, dict):
+        result.add_error(
+            f"Field 'metadata' must be a mapping, got {type(metadata).__name__}"
+        )
+        return
+
+    for key, value in metadata.items():
+        if not isinstance(key, str):
+            result.add_error(
+                f"Field 'metadata' keys must be strings, got {type(key).__name__} "
+                f"for key: {key}"
+            )
+        if not isinstance(value, str):
+            result.add_warning(
+                f"Field 'metadata' values should be strings, got "
+                f"{type(value).__name__} for key '{key}'. "
+                "Consider quoting the value in YAML (e.g., version: \"1.0\")."
+            )
+
+
+def validate_frontmatter(
+    frontmatter_str: str,
+    result: ValidationResult,
+    parent_dir_name: str | None = None,
+) -> dict:
     """Validate and parse YAML frontmatter."""
     if frontmatter_str is None:
         result.add_error(
@@ -268,16 +332,14 @@ def validate_frontmatter(frontmatter_str: str, result: ValidationResult) -> dict
         return {}
 
     # Validate required fields
-    validate_name(data.get("name", ""), result)
+    validate_name(data.get("name", ""), result, parent_dir_name=parent_dir_name)
     validate_description(data.get("description", ""), result)
 
     # Validate optional fields
     validate_allowed_tools(data.get("allowed-tools"), result)
-    validate_context_field(data.get("context"), data.get("agent"), result)
-    validate_model_field(data.get("model"), result)
-    validate_boolean_field(data, "user-invocable", result)
-    validate_boolean_field(data, "disable-model-invocation", result)
-    validate_hooks_field(data.get("hooks"), result)
+    validate_license_field(data.get("license"), result)
+    validate_compatibility_field(data.get("compatibility"), result)
+    validate_metadata_field(data.get("metadata"), result)
 
     # Check for unknown fields (error)
     unknown_fields = set(data.keys()) - KNOWN_FIELDS
@@ -291,86 +353,6 @@ def validate_frontmatter(frontmatter_str: str, result: ValidationResult) -> dict
     return data
 
 
-def validate_context_field(
-    context: str | None, agent: str | None, result: ValidationResult
-) -> None:
-    """Validate the 'context' and 'agent' fields."""
-    if context is None:
-        if agent is not None:
-            result.add_warning(
-                "Field 'agent' is specified but 'context' is not set. "
-                "'agent' only applies when 'context: fork' is set."
-            )
-        return
-
-    if not isinstance(context, str):
-        result.add_error(
-            f"Field 'context' must be a string, got {type(context).__name__}"
-        )
-        return
-
-    valid_contexts = {"fork"}
-    if context not in valid_contexts:
-        result.add_error(
-            f"Field 'context' has invalid value '{context}'. "
-            f"Valid values are: {', '.join(sorted(valid_contexts))}"
-        )
-
-
-def validate_model_field(model: str | None, result: ValidationResult) -> None:
-    """Validate the 'model' field."""
-    if model is None:
-        return
-
-    if not isinstance(model, str):
-        result.add_error(f"Field 'model' must be a string, got {type(model).__name__}")
-        return
-
-    # Common model values (not exhaustive, just informational)
-    common_models = {"opus", "sonnet", "haiku", "inherit"}
-    model_lower = model.lower()
-
-    # Check if it looks like a model identifier
-    if not any(m in model_lower for m in common_models):
-        result.add_info(
-            f"Field 'model' is set to '{model}'. Common values include: "
-            "opus, sonnet, haiku, inherit, or full model identifiers."
-        )
-
-
-def validate_boolean_field(
-    data: dict, field_name: str, result: ValidationResult
-) -> None:
-    """Validate a boolean frontmatter field."""
-    value = data.get(field_name)
-    if value is None:
-        return
-
-    if not isinstance(value, bool):
-        result.add_error(
-            f"Field '{field_name}' must be a boolean (true/false), "
-            f"got {type(value).__name__}: {value}"
-        )
-
-
-def validate_hooks_field(hooks: dict | None, result: ValidationResult) -> None:
-    """Validate the 'hooks' field."""
-    if hooks is None:
-        return
-
-    if not isinstance(hooks, dict):
-        result.add_error(f"Field 'hooks' must be a mapping, got {type(hooks).__name__}")
-        return
-
-    valid_hook_types = {"PreToolUse", "PostToolUse", "Stop"}
-    for hook_name in hooks.keys():
-        if hook_name not in valid_hook_types:
-            result.add_warning(
-                f"Unknown hook type: '{hook_name}'. "
-                f"Known hook types are: {', '.join(sorted(valid_hook_types))}"
-            )
-
-
 def validate_body(body: str, result: ValidationResult) -> None:
     """Validate the markdown body content."""
     if not body or not body.strip():
@@ -380,31 +362,15 @@ def validate_body(body: str, result: ValidationResult) -> None:
     lines = body.split("\n")
     line_count = len(lines)
 
-    # Check recommended line limit
+    # Check recommended line limit (spec recommends under 500 lines)
     if line_count > MAX_RECOMMENDED_BODY_LINES:
         result.add_warning(
             f"Body exceeds recommended {MAX_RECOMMENDED_BODY_LINES} lines "
             f"(got {line_count}). Consider splitting into separate files."
         )
 
-    # Check for Windows-style paths
-    windows_path_pattern = re.compile(r"\\[a-zA-Z]")
-    for i, line in enumerate(lines, start=1):
-        if windows_path_pattern.search(line):
-            result.add_warning(
-                f"Line {i}: Possible Windows-style path detected. "
-                "Use forward slashes for cross-platform compatibility."
-            )
-
     # Check for unsupported string substitution patterns
     validate_string_substitutions(body, result)
-
-    # Check for valid Dynamic Context Injection usage
-    dci_matches = DCI_PATTERN.findall(body)
-    if dci_matches:
-        result.add_info(
-            f"Found {len(dci_matches)} Dynamic Context Injection directive(s) (!`command`)"
-        )
 
     # Check for markdown headers (good structure)
     has_headers = any(line.strip().startswith("#") for line in lines)
@@ -413,16 +379,10 @@ def validate_body(body: str, result: ValidationResult) -> None:
             "Consider adding markdown headers to structure the skill content"
         )
 
-    # Check for code blocks (often useful in skills)
-    has_code_blocks = "```" in body
-    if has_code_blocks:
-        result.add_info("Skill contains code blocks")
-
 
 def validate_string_substitutions(content: str, result: ValidationResult) -> None:
     """Check for unsupported string substitution patterns."""
     # Skip content inside code blocks for substitution checks
-    # We'll check line by line, tracking code block state
     lines = content.split("\n")
     in_code_block = False
 
@@ -440,10 +400,9 @@ def validate_string_substitutions(content: str, result: ValidationResult) -> Non
         for pattern, syntax, description in UNSUPPORTED_SUBSTITUTION_PATTERNS:
             matches = pattern.findall(line)
             for match in matches:
-                result.add_error(
-                    f"Line {i}: Unsupported string substitution syntax {syntax} found: '{match}'. "
-                    f"This is {description}. "
-                    "Use Dynamic Context Injection (!`command`) instead for shell commands."
+                result.add_warning(
+                    f"Line {i}: Possible unsupported string substitution syntax "
+                    f"{syntax} found: '{match}' ({description})."
                 )
 
 
@@ -473,7 +432,9 @@ def validate_references(body: str, skill_dir: Path, result: ValidationResult) ->
             result.add_info(f"Referenced file exists: '{link_path}'")
 
 
-def validate_skill_file(file_path: Path) -> ValidationResult:
+def validate_skill_file(
+    file_path: Path, parent_dir_name: str | None = None
+) -> ValidationResult:
     """Validate a single SKILL.md file."""
     result = ValidationResult()
 
@@ -496,7 +457,7 @@ def validate_skill_file(file_path: Path) -> ValidationResult:
 
     # Extract and validate frontmatter
     frontmatter_str, body, _ = extract_frontmatter(content)
-    validate_frontmatter(frontmatter_str, result)
+    validate_frontmatter(frontmatter_str, result, parent_dir_name=parent_dir_name)
 
     # Validate body
     if body:
@@ -524,16 +485,26 @@ def validate_skill_directory(dir_path: Path) -> ValidationResult:
         result.add_error(f"SKILL.md not found in {dir_path}")
         return result
 
-    # Validate the SKILL.md file
-    file_result = validate_skill_file(skill_file)
+    # Validate the SKILL.md file, passing the directory name for name-matching check
+    file_result = validate_skill_file(skill_file, parent_dir_name=dir_path.name)
     result.merge(file_result)
 
-    # List other files in the directory
-    other_files = [
-        f.relative_to(dir_path)
-        for f in dir_path.rglob("*")
-        if f.is_file() and f.name != "SKILL.md"
-    ]
+    # Check for files outside SKILL.md and conventional directories
+    script_extensions = {".sh", ".py", ".js", ".ts", ".rb", ".pl", ".bash", ".zsh"}
+    other_files = []
+    for f in dir_path.rglob("*"):
+        if not f.is_file() or f.name == "SKILL.md":
+            continue
+        rel = f.relative_to(dir_path)
+        other_files.append(rel)
+
+        # Warn if script-like files are outside scripts/
+        if rel.suffix in script_extensions and not str(rel).startswith("scripts/"):
+            result.add_warning(
+                f"Script file '{rel}' is outside the 'scripts/' directory. "
+                "The spec recommends placing executable code in scripts/."
+            )
+
     if other_files:
         result.add_info(f"Additional files in skill directory: {len(other_files)}")
         for f in other_files[:10]:  # Show first 10
@@ -548,26 +519,26 @@ def format_result(result: ValidationResult, path: Path, verbose: bool = False) -
     """Format validation result for display."""
     lines = []
 
-    status = "✓ VALID" if result.valid else "✗ INVALID"
+    status = "\u2713 VALID" if result.valid else "\u2717 INVALID"
     lines.append(f"\n{'=' * 60}")
     lines.append(f"Validation result for: {path}")
     lines.append(f"Status: {status}")
     lines.append("=" * 60)
 
     if result.errors:
-        lines.append(f"\n❌ Errors ({len(result.errors)}):")
+        lines.append(f"\n\u274c Errors ({len(result.errors)}):")
         for error in result.errors:
-            lines.append(f"   • {error}")
+            lines.append(f"   \u2022 {error}")
 
     if result.warnings:
-        lines.append(f"\n⚠️  Warnings ({len(result.warnings)}):")
+        lines.append(f"\n\u26a0\ufe0f  Warnings ({len(result.warnings)}):")
         for warning in result.warnings:
-            lines.append(f"   • {warning}")
+            lines.append(f"   \u2022 {warning}")
 
     if verbose and result.info:
-        lines.append(f"\nℹ️  Info ({len(result.info)}):")
+        lines.append(f"\n\u2139\ufe0f  Info ({len(result.info)}):")
         for info in result.info:
-            lines.append(f"   • {info}")
+            lines.append(f"   \u2022 {info}")
 
     return "\n".join(lines)
 
@@ -575,9 +546,9 @@ def format_result(result: ValidationResult, path: Path, verbose: bool = False) -
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Validate SKILL.md files for Claude Code Agent Skills",
+        description="Validate SKILL.md files per the Agent Skills specification",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog="""\
 Examples:
   %(prog)s SKILL.md                    Validate a single file
   %(prog)s my-skill/                   Validate a skill directory
