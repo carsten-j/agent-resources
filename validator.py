@@ -66,6 +66,7 @@ OPTIONAL_FIELDS = {
     "metadata",  # Arbitrary key-value mapping for additional metadata
     "allowed-tools",  # Space-delimited list of pre-approved tools (experimental)
     "disable-model-invocation",  # Blocks Skill tool invocation (not in spec)
+    "argument-hint",  # Usage hints for slash command completion (not in spec)
 }
 
 # All known fields
