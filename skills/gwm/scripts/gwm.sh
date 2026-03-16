@@ -34,7 +34,7 @@ set -- "${args[@]+"${args[@]}"}"
 
 cmd="${1:-}"
 branch="${2:-}"
-sparse_path="${3:-}"
+sparse_path="${3:-src}"
 
 # ── JSON helpers ─────────────────────────────────────────────
 json_kv() {
@@ -151,12 +151,6 @@ do_add() {
     fi
 
     if ! $NO_RESTORE; then
-        cd "$worktree_path/src"
-        if ! err=$(dotnet restore --verbosity quiet 2>&1); then
-            emit "error" "add" "Worktree created but dotnet restore failed: $err" \
-                "{\"branch\":\"$(json_kv "$branch")\",\"path\":\"$(json_kv "$worktree_path")\",\"detail\":\"$(json_kv "$err")\"}"
-        fi
-
         # Copy shell scripts
         cp "$SRC_DIR"/src/*.sh "$worktree_path/src/" 2>/dev/null || true
 
@@ -166,6 +160,12 @@ do_add() {
                 cp -r "$SRC_DIR/src/$dir" "$worktree_path/src/$dir"
             fi
         done
+
+        cd "$worktree_path/src"
+        if ! err=$(dotnet restore --verbosity quiet 2>&1); then
+            emit "error" "add" "Worktree created but dotnet restore failed: $err" \
+                "{\"branch\":\"$(json_kv "$branch")\",\"path\":\"$(json_kv "$worktree_path")\",\"detail\":\"$(json_kv "$err")\"}"
+        fi
     fi
 
     local sparse_info="null"
@@ -178,25 +178,27 @@ do_add() {
 do_list() {
     local entries="[]"
     local items=()
+    local wt_path="" wt_branch="" wt_commit="" bare=false
 
-    while IFS= read -r line; do
-        # git worktree list --porcelain gives structured blocks
-        local wt_path="" wt_branch="" wt_commit="" bare=false
-
-        while IFS= read -r field; do
-            [[ -z "$field" ]] && break
-            case "$field" in
-                worktree\ *)  wt_path="${field#worktree }" ;;
-                HEAD\ *)      wt_commit="${field#HEAD }" ;;
-                branch\ *)    wt_branch="${field#branch refs/heads/}" ;;
-                bare)         bare=true ;;
-            esac
-        done
-
-        [[ -z "$wt_path" ]] && continue
-
+    flush_block() {
+        [[ -z "$wt_path" ]] && return
         items+=("{\"path\":\"$(json_kv "$wt_path")\",\"branch\":\"$(json_kv "$wt_branch")\",\"commit\":\"$(json_kv "$wt_commit")\",\"bare\":$bare}")
-    done < <(git worktree list --porcelain; echo "")
+        wt_path="" wt_branch="" wt_commit="" bare=false
+    }
+
+    while IFS= read -r field; do
+        if [[ -z "$field" ]]; then
+            flush_block
+            continue
+        fi
+        case "$field" in
+            worktree\ *)  wt_path="${field#worktree }" ;;
+            HEAD\ *)      wt_commit="${field#HEAD }" ;;
+            branch\ *)    wt_branch="${field#branch refs/heads/}" ;;
+            bare)         bare=true ;;
+        esac
+    done < <(git -C "$SRC_DIR" worktree list --porcelain; echo "")
+    flush_block
 
     # Join array
     local joined=""

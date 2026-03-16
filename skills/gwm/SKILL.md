@@ -2,6 +2,8 @@
 name: gwm
 description: Manage git worktrees using the gwm script. Supports creating, listing, removing, and checking status of worktrees. Use when the user says "create git worktree", "new worktree", or needs to work with multiple branches simultaneously via git worktrees.
 disable-model-invocation: false
+allowed-tools:
+  - Bash(bash .claude/skills/gwm/scripts/gwm.sh:*)
 ---
 
 # Git Worktree Manager (gwm)
@@ -54,8 +56,9 @@ Before running the `add` command, validate the branch name against the expected 
    - On error (`status: error`): show the error message and suggest corrective action
 
 4. **After creating a worktree** (successful `add` command)
-   - Use `cd` to change into the worktree folder (the path reported in the output)
-   - This ensures subsequent commands run in the context of the new worktree
+   - Report the full worktree path to the user (e.g., `/d/worktrees/kkep/KKEP-1234/src`)
+   - Note: `cd` does not persist between Bash tool calls, so do NOT try to `cd` into the folder — each shell invocation is independent
+   - For any follow-up commands that must run inside the worktree, prefix them with `cd <worktree-path> &&` or use absolute paths
 
 5. **Examples**
    - Create a worktree: `bash skills/gwm/scripts/gwm.sh add KKEP-1234 --plain`
